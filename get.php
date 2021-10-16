@@ -164,44 +164,42 @@ function uupGetFiles(
         if(isset($filesInfoList[$val])) unset($filesInfoList[$val]);
     }
 
-    if(!$sha256capable) {
-        $baseless = preg_grep('/^baseless_|-baseless\....$/i', array_keys($filesInfoList));
-        foreach($baseless as $val) {
-            if(isset($filesInfoList[$val])) unset($filesInfoList[$val]);
-        }
-
-        $psf = array_keys($filesInfoList);
-        $psf = preg_grep('/\.psf$/i', $psf);
-
-        $psfk = preg_grep('/Windows10\.0-KB.*/i', $psf);
-        $psfk = preg_grep('/.*-EXPRESS|.*-baseless/i', $psfk, PREG_GREP_INVERT);
-        if($build > 21380) foreach($psfk as $key => $val) {
-            if(isset($psf[$key])) unset($psf[$key]);
-        }
-        unset($psfk);
-
-        $removeFiles = array();
-        foreach($psf as $val) {
-            $name = preg_replace('/\.psf$/i', '', $val);
-            $removeFiles[] = $name;
-            unset($filesInfoList[$val]);
-        }
-        unset($index, $name, $psf);
-
-        $temp = preg_grep('/'.$updateArch.'_.*|arm64\.arm_.*|arm64\.x86_.*/i', $removeFiles);
-        foreach($temp as $key => $val) {
-            if(isset($filesInfoList[$val.'.cab'])) unset($filesInfoList[$val.'.cab']);
-            unset($removeFiles[$key]);
-        }
-        unset($temp);
-
-        foreach($removeFiles as $val) {
-            if(isset($filesInfoList[$val.'.esd'])) {
-                if(isset($filesInfoList[$val.'.cab'])) unset($filesInfoList[$val.'.cab']);
-            }
-        }
-        unset($removeFiles);
+    $baseless = preg_grep('/^baseless_|Windows10\.0-KB.*-EXPRESS|SSU-.*-EXPRESS/i', array_keys($filesInfoList));
+    foreach($baseless as $val) {
+        if(isset($filesInfoList[$val])) unset($filesInfoList[$val]);
     }
+
+    $psf = array_keys($filesInfoList);
+    $psf = preg_grep('/\.psf$/i', $psf);
+
+    $psfk = preg_grep('/Windows10\.0-KB.*/i', $psf);
+    $psfk = preg_grep('/.*-EXPRESS/i', $psfk, PREG_GREP_INVERT);
+    foreach($psfk as $key => $val) {
+        if(isset($psf[$key])) unset($psf[$key]);
+    }
+    unset($psfk);
+
+    $removeFiles = array();
+    foreach($psf as $val) {
+        $name = preg_replace('/\.psf$/i', '', $val);
+        $removeFiles[] = $name;
+        unset($filesInfoList[$val]);
+    }
+    unset($index, $name, $psf);
+
+    $temp = preg_grep('/'.$updateArch.'_.*|arm64\.arm_.*|arm64\.x86_.*/i', $removeFiles);
+    foreach($temp as $key => $val) {
+        if(isset($filesInfoList[$val.'.cab'])) unset($filesInfoList[$val.'.cab']);
+        unset($removeFiles[$key]);
+    }
+    unset($temp);
+
+    foreach($removeFiles as $val) {
+        if(isset($filesInfoList[$val.'.esd'])) {
+            if(isset($filesInfoList[$val.'.cab'])) unset($filesInfoList[$val.'.cab']);
+        }
+    }
+    unset($removeFiles);
 
     $filesInfoKeys = array_keys($filesInfoList);
 
@@ -255,7 +253,7 @@ function uupGetFiles(
                     $newFiles[$name] = $filesInfoList[$name];
                 } else {
                     $failedFile = true;
-					consoleLogger("Missing file: $val");
+                    consoleLogger("Missing file: $val");
                 }
             }
         } else {
@@ -267,7 +265,7 @@ function uupGetFiles(
                     $newFiles[$name] = $filesInfoList[$name];
                 } else {
                     $failedFile = true;
-					consoleLogger("Missing file: $name");
+                    consoleLogger("Missing file: $name");
                 }
             }
         }
@@ -381,9 +379,23 @@ function uupGetOnlineFiles($updateId, $rev, $info, $cacheRequests, $type) {
         }
 
         if($sha256capable) {
-            $n = strrpos($name, '.');
-            if($n === false) $n = strlen($name);
-            $newName = substr($name, 0, $n).'_'.substr($sha1, 0, 8).substr($name, $n);
+            $tempname = uupCleanSha256($name);
+            if(isset($files[$tempname])) {
+                if(preg_match('/\.cab$/i', $tempname)) {
+                    if($size > $files[$tempname]['size']) {
+                        $express = 'baseless_'.$tempname;
+                        $files[$express] = $files[$tempname];
+                        unset($files[$tempname]);
+                        $newName = $tempname;
+                    } else {
+                        $newName = 'baseless_'.$tempname;
+                    }
+                } else {
+                    $newName = uupAppendSha1($tempname, $sha1);
+                }
+            } else {
+                $newName = $tempname;
+            }
         } else {
             $newName = $uupCleanFunc($name);
         }
@@ -450,9 +462,29 @@ function uupGetOfflineFiles($info) {
         $sha256 = isset($val['sha256']) ? $val['sha256'] : null;
 
         if($sha256capable) {
-            $n = strrpos($name, '.');
-            if($n === false) $n = strlen($name);
-            $newName = substr($name, 0, $n).'_'.substr($sha1, 0, 8).substr($name, $n);
+            // clean file name
+            $tempname = uupCleanSha256($name);
+            if(isset($files[$tempname])) {
+                // check existing file with the same name
+                if(preg_match('/\.cab$/i', $tempname)) {
+                    // compare cab files only
+                    if($size > $files[$tempname]['size']) {
+                        // if the existing file is smaller, rename it
+                        $express = 'baseless_'.$tempname;
+                        $files[$express] = $files[$tempname];
+                        unset($files[$tempname]);
+                        $newName = $tempname;
+                    } else {
+                        // if the new file is smaller, rename it
+                        $newName = 'baseless_'.$tempname;
+                    }
+                } else {
+                    // not a cab file, append hash to differentiate
+                    $newName = uupAppendSha1($tempname, $sha1);
+                }
+            } else {
+                $newName = $tempname;
+            }
         } else {
             $newName = $uupCleanFunc($name);
         }
@@ -476,6 +508,25 @@ function uupGetOfflineFiles($info) {
     }
 
     return $files;
+}
+
+function uupAppendSha1($name, $sha1) {
+    $n = strrpos($name, '.');
+    if($n === false) $n = strlen($name);
+    return substr($name, 0, $n).'_'.substr($sha1, 0, 8).substr($name, $n);
+}
+
+function uupCleanSha256($name) {
+    $replace = array(
+        'MetadataESD_' => null,
+        'metadataesd_' => null,
+        '~31bf3856ad364e35' => null,
+        '~~.' => '.',
+        '~.' => '.',
+        '~' => '-',
+    );
+
+    return strtr($name, $replace);
 }
 
 function uupCleanName($name) {
